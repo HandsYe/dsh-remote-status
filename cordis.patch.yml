@@ -1,0 +1,7 @@
+# dsh-remote-status bundle patch
+# Inserts this plugin into a profile's layer stack when the profile lists the
+# bundle. The row is referenced by package name so Node resolution finds the
+# installed code.
+- insert:
+    - id: dsh-remote-status
+      name: 'dsh-remote-status'
