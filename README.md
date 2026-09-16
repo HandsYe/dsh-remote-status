@@ -26,10 +26,10 @@ DeepSeek Harness 插件：**侧边栏底部「本地 / 远程」状态芯片** +
 
 ```bash
 # 本地源码安装（开发/自用）
-dsh plugin add file:D:/path/to/dsh-remote-status --profile desktop
+dsh plugin add "file:<仓库路径>/dsh-remote-status" --profile desktop
 
 # 或改 profile 的 package.json（等价手动方式）：
-#   dependencies 增加 "dsh-remote-status": "file:.../dsh-remote-status"
+#   dependencies 增加 "dsh-remote-status": "file:<仓库路径>/dsh-remote-status"
 #   dsh.profile.bundles 数组增加 "dsh-remote-status"
 ```
 
