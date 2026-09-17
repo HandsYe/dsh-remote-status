@@ -11,16 +11,21 @@ const src = fs.readFileSync(CLIENT, 'utf8')
 
 // ── 模拟宿主数据 ──────────────────────────────────────────────────────────
 const MIRRORS = [
-  { local: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\172.16.233.225-yehui-22\\m1', remote: '/data3/yehui/m1', machine: 'm-chaozhou' },
-  { local: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\172.16.233.225-yehui-22\\4tngs', remote: '/data3/yehui/project/2026-sjzp-tngs/4tngs', machine: 'm-chaozhou' },
+  { local: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\172.16.233.225-yehui-22\\m1', remote: '/data3/yehui/m1', machine: 'm-chaozhou', hostDir: '172.16.233.225-yehui-22' },
+  { local: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\172.16.233.225-yehui-22\\4tngs', remote: '/data3/yehui/project/2026-sjzp-tngs/4tngs', machine: 'm-chaozhou', hostDir: '172.16.233.225-yehui-22' },
+  { local: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\10.0.0.5-root-22\\api', remote: '/srv/api', machine: 'm-shenzhen', hostDir: '10.0.0.5-root-22' },
 ]
-const MACHINES = [{ id: 'm-chaozhou', name: '潮州服务器', host: '172.16.233.225', username: 'yehui', workspace: '/data3/yehui' }]
+const MACHINES = [
+  { id: 'm-chaozhou', name: '潮州服务器', host: '172.16.233.225', username: 'yehui', workspace: '/data3/yehui' },
+  { id: 'm-shenzhen', name: '深圳服务器', host: '10.0.0.5', username: 'root', workspace: '/srv' },
+]
 const SESSIONS = {
   current: 's1',
-  order: ['s1', 's2'],
+  order: ['s1', 's2', 's3'],
   byId: {
     s1: { id: 's1', cwd: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\172.16.233.225-yehui-22\\m1' },
     s2: { id: 's2', cwd: 'D:\\本地\\项目' },
+    s3: { id: 's3', cwd: 'C:\\Users\\yehui\\.dsh\\remote-workspaces\\10.0.0.5-root-22\\api' },
   },
 }
 let FAIL_STATUS = false
@@ -37,7 +42,9 @@ const resolveMirror = (local) => {
 const sessionModeOf = (sid) => {
   const cwd = SESSIONS.byId[sid] && SESSIONS.byId[sid].cwd
   const m = cwd ? resolveMirror(cwd) : null
-  return m ? { mode: 'remote', remotePath: m.remote } : { mode: 'local', remotePath: '' }
+  return m
+    ? { mode: 'remote', remotePath: m.remote, hostDir: m.hostDir, machine: m.machine }
+    : { mode: 'local', remotePath: '', hostDir: '', machine: null }
 }
 
 // ── 迷你宿主路由 ──────────────────────────────────────────────────────────
@@ -54,6 +61,9 @@ const server = http.createServer((req, res) => {
     return send(200, {
       connected: true, currentId: 'm-chaozhou', activeSource: 'machine',
       sessionMode: sm.mode, sessionRemotePath: sm.remotePath,
+      sessionMachineId: sm.machine || null,
+      sessionMachineName: sm.machine ? ((MACHINES.find((x) => x.id === sm.machine) || {}).name || '') : '',
+      sessionHostDir: sm.hostDir || '',
     })
   }
   if (u.pathname === '/dsh-remote-status/machines') {
@@ -269,7 +279,7 @@ server.listen(0, '127.0.0.1', () => {
     await hooks.refreshPill()
     await new Promise((r) => setTimeout(r, 300))
     const tipRemote = pill().comp({ wide: true }).props.title || ''
-    assert(tipRemote.includes('机器列表：1 台'), '远程悬停含「机器列表」行')
+    assert(tipRemote.includes('机器列表：2 台'), '远程悬停含「机器列表」行')
     assert(tipRemote.includes('当前机器：潮州服务器'), '远程悬停含「当前机器：潮州服务器」')
     // 8) 事件订阅：切换目录 → 无需等轮询，防抖后立即刷新
     FAIL_STATUS = false
@@ -297,6 +307,15 @@ server.listen(0, '127.0.0.1', () => {
     assert(renderText(pill().comp({ wide: true })).includes('本地'), '事件驱动刷新在接口故障时保留 last-known 文本')
     assert(renderText(pill().comp({ wide: true })).includes('⚠'), '事件驱动刷新携带失败降级标记')
     FAIL_STATUS = false   // 保留桩状态供后续若有用
+    // 9) 多远程机切换 → 机器名跟随会话归属变化（不再依赖全局 currentId）
+    SESSIONS.current = 's3'
+    sessSubscribers.forEach((fn) => fn())
+    await new Promise((r) => setTimeout(r, 500))
+    assert(renderText(pill().comp({ wide: true })).includes('远程 · 深圳服务器'), '多机切换：s3(深圳) → 显示深圳服务器')
+    SESSIONS.current = 's1'
+    sessSubscribers.forEach((fn) => fn())
+    await new Promise((r) => setTimeout(r, 500))
+    assert(renderText(pill().comp({ wide: true })).includes('远程 · 潮州服务器'), '多机切换：s1(潮州) → 显示潮州服务器')
     console.log('\n--- 结果 ---')
     console.log('改名记录:', JSON.stringify(renames, null, 0))
     console.log('最终标题:', JSON.stringify(workspacesItems.map((x) => x.title)))
