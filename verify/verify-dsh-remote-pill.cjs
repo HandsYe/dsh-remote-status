@@ -1,12 +1,13 @@
-// dsh-remote 状态芯片 + 工作区标题标记 集成测试
-// 加载真实 client.js（含改造），经 vm + fetch 垫片桥接到本地模拟宿主路由，
-// 验证：芯片渲染文本、远程/本地判定、标题标记、幂等、降级。
+// dsh-remote 状态芯片 集成测试
+// 加载真实 client.js，经 vm + fetch 垫片桥接到本地模拟宿主路由，
+// 验证：芯片渲染文本、远程/本地判定、工作区标题保持原样、降级。
 'use strict'
 const fs = require('fs')
 const vm = require('vm')
 const http = require('http')
+const path = require('node:path')
 
-const CLIENT = process.env.CLIENT || 'D:/开发项目/dsh-remote-status/lib/client.js'
+const CLIENT = process.env.CLIENT || path.join(__dirname, '..', 'lib', 'client.js')
 const src = fs.readFileSync(CLIENT, 'utf8')
 
 // ── 模拟宿主数据 ──────────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ const server = http.createServer((req, res) => {
     const local = u.searchParams.get('local') ? decodeURIComponent(u.searchParams.get('local')) : ''
     const m = resolveMirror(local)
     return send(200, m
-      ? { local, remotePath: m.remote, mirrorDir: m.local, fallback: false, mode: 'remote', resolvedVia: 'query' }
+      ? { local, remotePath: m.remote, mirrorDir: m.local, fallback: false, mode: 'remote', resolvedVia: 'query', machineName: (MACHINES.find((x) => x.id === m.machine) || {}).name || '' }
       : { local, remotePath: '', mirrorDir: null, fallback: true, mode: 'local', resolvedVia: 'query' })
   }
   send(404, { error: 'not found' })
@@ -198,6 +199,7 @@ server.listen(0, '127.0.0.1', () => {
         get: (n) => {
           if (n === 'slots') return slotsStub
           if (n === 'sessions') return sessionsStub
+          if (n === 'workspaces') return workspacesMode === 'present' ? workspacesStub : null
           if (n === 'sidebarRightTabs') return tabsStub
           if (n === 'betterSidebar') return betterSsr
           return null
@@ -227,25 +229,18 @@ server.listen(0, '127.0.0.1', () => {
   ;(async () => {
     // 1) 立即：首次 pillRefresh（apply 时调用）
     await hooks.refreshPill()
-    await new Promise((r) => setTimeout(r, 1200)) // 等待标记防抖
+    await new Promise((r) => setTimeout(r, 1200)) // 等待一轮轮询
     const pill0 = pill()
     assert(!!pill0, 'sidebar.footer.action 插槽注册了 dsh-remote-status 芯片')
     const wideWide = pill0.comp({ wide: true })
     assert(renderText(wideWide).includes('远程 · 潮州服务器'), '展开态：远程会话 → 文本=远程 · 潮州服务器')
     const wideDot = pill0.comp({ wide: false })
     assert(renderText(wideDot).includes('⇄'), '收起态：远程 → ⇄ 圆点')
-    // 2) 标题标记
-    await hooks.sweepOnce()
+    // 2) 工作区标题保持原样：插件只做显示，不做任何改名
+    const titles0 = workspacesItems.map((x) => x.title).slice()
     await new Promise((r) => setTimeout(r, 300))
-    const t1 = workspacesItems.map((x) => x.title)
-    assert(t1[0] === 'm1 ⇄ 潮州服务器', '镜像工作区 w1 已标记: ' + t1[0])
-    assert(t1[1] === '4tngs ⇄ 潮州服务器', '镜像工作区 w2 已标记: ' + t1[1])
-    assert(t1[2] === '本地项目' && t1[3] === 'm1' && t1[4] === '自定义 m1', '非镜像/自定义标题未动: ' + JSON.stringify(t1.slice(2)))
-    // 3) 幂等：再次 sweep 不重复标记
-    const before = renames.length
-    await hooks.sweepOnce()
-    await new Promise((r) => setTimeout(r, 300))
-    assert(renames.length === before, '幂等：重复 sweep 零新增改名（' + before + ' 次）')
+    assert(renames.length === 0, '零改名：插件不修改工作区标题')
+    assert(JSON.stringify(workspacesItems.map((x) => x.title)) === JSON.stringify(titles0), '工作区标题未被触碰')
     // 4) 切换到本地会话
     SESSIONS.current = 's2'
     await hooks.refreshPill()
@@ -257,16 +252,17 @@ server.listen(0, '127.0.0.1', () => {
     await hooks.refreshPill()
     assert(renderText(pill().comp({ wide: true })).includes('本地'), '状态接口失败：保留 last-known 文本')
     assert(renderText(pill().comp({ wide: true })).includes('⚠'), '状态接口失败 → ⚠ 降级标记')
-    // 6) workspaces 服务缺失 → ⚠ + 不崩溃
+    // 6) workspaces 服务缺失 → 芯片只依赖 sessions + 状态接口，照常工作
     FAIL_STATUS = false
     workspacesMode = 'missing'
     await hooks.refreshPill()
     await new Promise((r) => setTimeout(r, 300))
-    assert(renderText(pill().comp({ wide: true })).includes('⚠'), 'workspaces 缺失 → ⚠ 降级标记')
-    assert(workspacesItems[1].title === '4tngs ⇄ 潮州服务器', '服务缺失时无异常改名')
+    const text6 = renderText(pill().comp({ wide: true }))
+    assert(text6.includes('本地') && !text6.includes('⚠'), 'workspaces 缺失 → 芯片照常显示，状态正常无 ⚠')
+    assert(renames.length === 0, '服务缺失场景同样零改名')
     // 7) 诊断文本
     const tip = renderText(pill().comp({ wide: true })) + (pill().comp({ wide: true }).props.title || '')
-    assert(/workspaces 服务：(正常|缺失)/.test(tip) || true, '工具提示包含诊断块')
+    assert(tip.includes('状态接口：'), '工具提示包含诊断块')
     // 7b) 本地模式悬停：不含远程机器信息；远程模式：含机器信息
     SESSIONS.current = 's2'
     await hooks.refreshPill()
@@ -283,11 +279,9 @@ server.listen(0, '127.0.0.1', () => {
     assert(tipRemote.includes('当前机器：潮州服务器'), '远程悬停含「当前机器：潮州服务器」')
     // 8) 事件订阅：切换目录 → 无需等轮询，防抖后立即刷新
     FAIL_STATUS = false
-    workspacesMode = 'present'
     await hooks.refreshPill()
     await new Promise((r) => setTimeout(r, 300))
     assert(sessSubscribers.length >= 1, 'sessions.list.subscribe 已接线')
-    assert(wsSubscribers.length >= 1, 'workspaces.list.subscribe 已接线')
     // 切到远程会话，触发订阅回调（模拟改目录）
     SESSIONS.current = 's1'
     sessSubscribers.forEach((fn) => fn())
@@ -304,7 +298,7 @@ server.listen(0, '127.0.0.1', () => {
     SESSIONS.current = 's1'
     sessSubscribers.forEach((fn) => fn())
     await new Promise((r) => setTimeout(r, 500))
-    assert(renderText(pill().comp({ wide: true })).includes('本地'), '事件驱动刷新在接口故障时保留 last-known 文本')
+    assert(renderText(pill().comp({ wide: true })).includes('状态待确认'), '切换后接口故障：不沿用上个会话的模式或服务器')
     assert(renderText(pill().comp({ wide: true })).includes('⚠'), '事件驱动刷新携带失败降级标记')
     FAIL_STATUS = false   // 保留桩状态供后续若有用
     // 9) 多远程机切换 → 机器名跟随会话归属变化（不再依赖全局 currentId）
@@ -318,7 +312,7 @@ server.listen(0, '127.0.0.1', () => {
     assert(renderText(pill().comp({ wide: true })).includes('远程 · 潮州服务器'), '多机切换：s1(潮州) → 显示潮州服务器')
     console.log('\n--- 结果 ---')
     console.log('改名记录:', JSON.stringify(renames, null, 0))
-    console.log('最终标题:', JSON.stringify(workspacesItems.map((x) => x.title)))
+    console.log('工作区标题（保持原样）:', JSON.stringify(workspacesItems.map((x) => x.title)))
     process.exit(process.exitCode || 0)
   })().catch((e) => { console.error('测试异常:', e); process.exit(1) })
 })
