@@ -51,7 +51,8 @@ dsh-remote-status/
 
 ```bash
 node --check lib/client.js lib/index.js
-node verify/verify-dsh-remote-pill.cjs   # 集成测试（模拟宿主 + 真实 client.js）
+node verify/verify-dsh-remote-pill.cjs     # 客户端状态芯片、切换与多机器回归
+node verify/verify-host-session-lookup.cjs # 宿主 zstd session header cwd 回退
 ```
 
 ## License

@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-status",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local/remote status chip for the DeepSeek Harness sidebar + automatic workspace title markers (目录 ⇄ 机器名) for remote mirror workspaces.",
   "license": "MIT",
   "author": "HandsYe <HandsYe@users.noreply.github.com>",
